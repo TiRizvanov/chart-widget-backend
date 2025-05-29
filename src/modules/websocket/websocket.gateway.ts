@@ -3,10 +3,14 @@ import { Server, Socket } from 'socket.io';
 
 @WSGateway({
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST'],
+    origin: ['http://localhost:3001', 'https://localhost:3001', '*'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
     credentials: true,
+    preflightContinue: false,
   },
+  allowEIO3: true,
+  transports: ['websocket', 'polling'],
 })
 export class WebSocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
