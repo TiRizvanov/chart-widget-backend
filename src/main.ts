@@ -10,12 +10,16 @@ async function bootstrap() {
     transform: true,
   }));
 
-  // Allow all origins for CORS
+  // Comprehensive CORS configuration for Railway deployment
   app.enableCors({
-    origin: true, // This allows all origins
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    origin: ['http://localhost:3001', 'https://localhost:3001', '*'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+    exposedHeaders: ['Content-Disposition'],
     credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+    maxAge: 86400, // 24 hours
   });
 
   // Use Railway's PORT environment variable
