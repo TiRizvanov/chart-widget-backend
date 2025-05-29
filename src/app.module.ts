@@ -5,6 +5,7 @@ import { ChartModule } from './modules/chart/chart.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { WebSocketModule } from './modules/websocket/websocket.module';
 import { DataSeederModule } from './modules/data-seeder/data-seeder.module';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -13,16 +14,16 @@ import { DataSeederModule } from './modules/data-seeder/data-seeder.module';
     }),
     TypeOrmModule.forRoot({
       type: 'postgres',
-      // Keep your Supabase configuration
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT) || 5432,
-      username: process.env.DB_USERNAME || 'postgres',
-      password: process.env.DB_PASSWORD || 'postgres',
-      database: process.env.DB_NAME || 'chart_widget',
+      // Railway provides DATABASE_URL, but we'll keep individual variables as fallback
+      url: process.env.DATABASE_URL,
+      host: process.env.DB_HOST || process.env.PGHOST,
+      port: parseInt(process.env.DB_PORT || process.env.PGPORT) || 5432,
+      username: process.env.DB_USERNAME || process.env.PGUSER,
+      password: process.env.DB_PASSWORD || process.env.PGPASSWORD,
+      database: process.env.DB_NAME || process.env.PGDATABASE,
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
       synchronize: process.env.NODE_ENV !== 'production',
       logging: process.env.NODE_ENV !== 'production',
-      // Add SSL for production (Supabase requires it)
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     }),
     AuthModule,
@@ -30,5 +31,6 @@ import { DataSeederModule } from './modules/data-seeder/data-seeder.module';
     WebSocketModule,
     DataSeederModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}
