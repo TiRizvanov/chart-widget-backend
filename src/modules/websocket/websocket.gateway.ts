@@ -1,17 +1,11 @@
-import {
-  WebSocketGateway as WSGateway,
-  WebSocketServer,
-  SubscribeMessage,
-  OnGatewayConnection,
-  OnGatewayDisconnect,
-  ConnectedSocket,
-  MessageBody,
-} from '@nestjs/websockets';
+import { WebSocketGateway as WSGateway, WebSocketServer, SubscribeMessage, OnGatewayConnection, OnGatewayDisconnect, ConnectedSocket, MessageBody } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 
 @WSGateway({
   cors: {
     origin: '*',
+    methods: ['GET', 'POST'],
+    credentials: true,
   },
 })
 export class WebSocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -38,17 +32,17 @@ export class WebSocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   ) {
     const { chartId } = data;
     client.join(`chart:${chartId}`);
-    
+
     if (!this.chartRooms.has(chartId)) {
       this.chartRooms.set(chartId, new Set());
     }
     this.chartRooms.get(chartId).add(client.id);
-    
+
     // Notify other users
-    client.to(`chart:${chartId}`).emit('user:joined', { 
-      userId: client.data.userId || client.id 
+    client.to(`chart:${chartId}`).emit('user:joined', {
+      userId: client.data.userId || client.id,
     });
-    
+
     console.log(`Client ${client.id} joined chart ${chartId}`);
   }
 
@@ -59,16 +53,16 @@ export class WebSocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   ) {
     const { chartId } = data;
     client.leave(`chart:${chartId}`);
-    
+
     if (this.chartRooms.has(chartId)) {
       this.chartRooms.get(chartId).delete(client.id);
     }
-    
+
     // Notify other users
-    client.to(`chart:${chartId}`).emit('user:left', { 
-      userId: client.data.userId || client.id 
+    client.to(`chart:${chartId}`).emit('user:left', {
+      userId: client.data.userId || client.id,
     });
-    
+
     console.log(`Client ${client.id} left chart ${chartId}`);
   }
 
