@@ -9,7 +9,7 @@ async function bootstrap() {
     whitelist: true,
     transform: true,
   }));
-  
+
   // Allow all origins for CORS
   app.enableCors({
     origin: true, // This allows all origins
@@ -17,7 +17,7 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
-  
+
   // Use Railway's PORT environment variable
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0'); // Listen on all interfaces
