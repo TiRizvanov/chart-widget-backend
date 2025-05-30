@@ -12,9 +12,9 @@ async function bootstrap() {
       transform: true,
     }));
 
-    // Comprehensive CORS configuration
+    // Allow CORS for ALL origins
     app.enableCors({
-      origin: ['http://localhost:3001', 'https://localhost:3001', '*'],
+      origin: true, // This allows ALL origins
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
       allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
       exposedHeaders: ['Content-Disposition'],
