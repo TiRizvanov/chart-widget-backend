@@ -1,18 +1,15 @@
-import { Injectable, NotFoundException, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Chart } from './entities/chart.entity';
-import { Drawing } from './entities/drawing.entity';
-import { Indicator } from './entities/indicator.entity';
-import { CreateChartDto } from './dto/create-chart.dto';
-import { UpdateChartDto } from './dto/update-chart.dto';
-import { CreateDrawingDto } from './dto/create-drawing.dto';
-import { CreateIndicatorDto } from './dto/create-indicator.dto';
+import { Chart } from '../../entities/chart.entity';
+import { Drawing } from '../../entities/drawing.entity';
+import { Indicator } from '../../entities/indicator.entity';
+import { ChartData } from '../../entities/chart-data.entity';
+import { CreateChartDto, UpdateChartDto, CreateDrawingDto, CreateIndicatorDto, UpdateDrawingDto } from './chart.dto';
+import { WebSocketGateway } from '../websocket/websocket.gateway';
 
 @Injectable()
 export class ChartService {
-  private readonly logger = new Logger(ChartService.name);
-
   constructor(
     @InjectRepository(Chart)
     private chartRepository: Repository<Chart>,
@@ -20,263 +17,226 @@ export class ChartService {
     private drawingRepository: Repository<Drawing>,
     @InjectRepository(Indicator)
     private indicatorRepository: Repository<Indicator>,
+    @InjectRepository(ChartData)
+    private chartDataRepository: Repository<ChartData>,
+    private wsGateway: WebSocketGateway,
   ) {}
 
-  async create(createChartDto: CreateChartDto): Promise<Chart> {
+  async createChart(createChartDto: CreateChartDto, userId: string): Promise<Chart> {
+    const chart = this.chartRepository.create({
+      ...createChartDto,
+    });
+    const savedChart = await this.chartRepository.save(chart);
+    
+    this.wsGateway.broadcastChartUpdate(savedChart.id, 'chart:created', savedChart);
+    return savedChart;
+  }
+
+  async getChart(chartId: string): Promise<Chart> {
+    const chart = await this.chartRepository.findOne({
+      where: { id: chartId },
+      relations: ['drawings', 'indicators'],
+    });
+    
+    if (!chart) {
+      throw new NotFoundException('Chart not found');
+    }
+    
+    return chart;
+  }
+
+  async updateChart(chartId: string, updateChartDto: UpdateChartDto): Promise<Chart> {
+    await this.chartRepository.update(chartId, updateChartDto);
+    const updatedChart = await this.getChart(chartId);
+    
+    this.wsGateway.broadcastChartUpdate(chartId, 'chart:updated', updatedChart);
+    return updatedChart;
+  }
+
+  async addDrawing(chartId: string, createDrawingDto: CreateDrawingDto, userId: string): Promise<Drawing> {
+    const drawing = this.drawingRepository.create({
+      type: createDrawingDto.type,
+      coordinates: createDrawingDto.coordinates,
+      style: createDrawingDto.style,
+      chart: { id: chartId },
+    });
+    
+    const savedDrawing = await this.drawingRepository.save(drawing);
+    this.wsGateway.broadcastChartUpdate(chartId, 'drawing:added', savedDrawing);
+    
+    return savedDrawing;
+  }
+
+  async updateDrawing(drawingId: string, updateData: UpdateDrawingDto): Promise<Drawing> {
+    const updateObject: any = {};
+    
+    if (updateData.coordinates) {
+      updateObject.coordinates = updateData.coordinates;
+    }
+    
+    if (updateData.style) {
+      updateObject.style = updateData.style;
+    }
+    
+    if (updateData.type) {
+      updateObject.type = updateData.type;
+    }
+
+    await this.drawingRepository.update(drawingId, updateObject);
+    
+    const drawing = await this.drawingRepository.findOne({
+      where: { id: drawingId },
+      relations: ['chart'],
+    });
+    
+    if (drawing) {
+      this.wsGateway.broadcastChartUpdate(drawing.chart.id, 'drawing:updated', drawing);
+    }
+    return drawing;
+  }
+
+  async deleteDrawing(drawingId: string): Promise<void> {
+    const drawing = await this.drawingRepository.findOne({
+      where: { id: drawingId },
+      relations: ['chart'],
+    });
+    
+    if (drawing) {
+      await this.drawingRepository.delete(drawingId);
+      this.wsGateway.broadcastChartUpdate(drawing.chart.id, 'drawing:deleted', { id: drawingId });
+    }
+  }
+
+  async addIndicator(chartId: string, createIndicatorDto: CreateIndicatorDto, userId: string): Promise<Indicator> {
     try {
-      const chart = this.chartRepository.create({
-        ...createChartDto,
-        drawings: [],
-        indicators: [],
+      console.log('Creating indicator with data:', {
+        type: createIndicatorDto.type,
+        parameters: createIndicatorDto.parameters,
+        style: createIndicatorDto.style,
+        chartId
       });
-      return await this.chartRepository.save(chart);
-    } catch (error) {
-      this.logger.error(`Failed to create chart: ${error.message}`, error.stack);
-      throw new BadRequestException(`Failed to create chart: ${error.message}`);
-    }
-  }
 
-  async findAll(): Promise<Chart[]> {
-    try {
-      return await this.chartRepository.find({
-        relations: ['drawings', 'indicators'],
-      });
-    } catch (error) {
-      this.logger.error(`Failed to find all charts: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  async findOne(id: string): Promise<Chart> {
-    try {
-      const chart = await this.chartRepository.findOne({
-        where: { id },
-        relations: ['drawings', 'indicators'],
-      });
-      
-      if (!chart) {
-        throw new NotFoundException(`Chart with ID ${id} not found`);
-      }
-      
-      return chart;
-    } catch (error) {
-      this.logger.error(`Failed to find chart ${id}: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  async update(id: string, updateChartDto: UpdateChartDto): Promise<Chart> {
-    try {
-      const chart = await this.findOne(id);
-      
-      // Update chart properties
-      Object.assign(chart, updateChartDto);
-      
-      return await this.chartRepository.save(chart);
-    } catch (error) {
-      this.logger.error(`Failed to update chart ${id}: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  async remove(id: string): Promise<void> {
-    try {
-      const chart = await this.findOne(id);
-      await this.chartRepository.remove(chart);
-    } catch (error) {
-      this.logger.error(`Failed to remove chart ${id}: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  // Drawings methods
-  async addDrawing(chartId: string, createDrawingDto: CreateDrawingDto): Promise<Drawing> {
-    try {
-      this.logger.log(`Adding drawing to chart ${chartId}: ${JSON.stringify(createDrawingDto)}`);
-      
-      // Find the chart
-      const chart = await this.findOne(chartId);
-      
-      // Create the drawing
-      const drawing = this.drawingRepository.create({
-        ...createDrawingDto,
-        chart,
-        visible: true,
-      });
-      
-      // Save the drawing
-      return await this.drawingRepository.save(drawing);
-    } catch (error) {
-      this.logger.error(`Failed to add drawing to chart ${chartId}: ${error.message}`, error.stack);
-      throw new BadRequestException(`Failed to add drawing: ${error.message}`);
-    }
-  }
-
-  async getDrawings(chartId: string): Promise<Drawing[]> {
-    try {
-      // Find the chart to ensure it exists
-      await this.findOne(chartId);
-      
-      // Get all drawings for this chart
-      return await this.drawingRepository.find({
-        where: { chart: { id: chartId } },
-      });
-    } catch (error) {
-      this.logger.error(`Failed to get drawings for chart ${chartId}: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  async updateDrawing(chartId: string, drawingId: string, updateDrawingDto: any): Promise<Drawing> {
-    try {
-      // Find the chart to ensure it exists
-      await this.findOne(chartId);
-      
-      // Find the drawing
-      const drawing = await this.drawingRepository.findOne({
-        where: { id: drawingId, chart: { id: chartId } },
-      });
-      
-      if (!drawing) {
-        throw new NotFoundException(`Drawing with ID ${drawingId} not found in chart ${chartId}`);
-      }
-      
-      // Update drawing properties
-      Object.assign(drawing, updateDrawingDto);
-      
-      // Save the drawing
-      return await this.drawingRepository.save(drawing);
-    } catch (error) {
-      this.logger.error(`Failed to update drawing ${drawingId} for chart ${chartId}: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  async removeDrawing(chartId: string, drawingId: string): Promise<void> {
-    try {
-      // Find the chart to ensure it exists
-      await this.findOne(chartId);
-      
-      // Find the drawing
-      const drawing = await this.drawingRepository.findOne({
-        where: { id: drawingId, chart: { id: chartId } },
-      });
-      
-      if (!drawing) {
-        throw new NotFoundException(`Drawing with ID ${drawingId} not found in chart ${chartId}`);
-      }
-      
-      // Remove the drawing
-      await this.drawingRepository.remove(drawing);
-    } catch (error) {
-      this.logger.error(`Failed to remove drawing ${drawingId} from chart ${chartId}: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  // Indicators methods
-  async addIndicator(chartId: string, createIndicatorDto: CreateIndicatorDto): Promise<Indicator> {
-    try {
-      this.logger.log(`Adding indicator to chart ${chartId}: ${JSON.stringify(createIndicatorDto)}`);
-      
-      // Find the chart
-      const chart = await this.findOne(chartId);
-      
-      // Create the indicator
+      // Don't convert to lowercase - keep as received from frontend
       const indicator = this.indicatorRepository.create({
-        ...createIndicatorDto,
-        chart,
-        visible: true,
+        type: createIndicatorDto.type, // Keep uppercase (SMA, EMA, etc.)
+        parameters: createIndicatorDto.parameters,
+        style: createIndicatorDto.style || { color: '#ffaa00', lineWidth: 2 },
+        displayOrder: createIndicatorDto.displayOrder || 0,
+        chart: { id: chartId },
       });
       
-      // Save the indicator
-      return await this.indicatorRepository.save(indicator);
-    } catch (error) {
-      this.logger.error(`Failed to add indicator to chart ${chartId}: ${error.message}`, error.stack);
-      throw new BadRequestException(`Failed to add indicator: ${error.message}`);
-    }
-  }
-
-  async getIndicators(chartId: string): Promise<Indicator[]> {
-    try {
-      // Find the chart to ensure it exists
-      await this.findOne(chartId);
+      console.log('Created indicator entity:', indicator);
       
-      // Get all indicators for this chart
-      return await this.indicatorRepository.find({
-        where: { chart: { id: chartId } },
-      });
+      const savedIndicator = await this.indicatorRepository.save(indicator);
+      console.log('Saved indicator:', savedIndicator);
+      
+      this.wsGateway.broadcastChartUpdate(chartId, 'indicator:added', savedIndicator);
+      
+      return savedIndicator;
     } catch (error) {
-      this.logger.error(`Failed to get indicators for chart ${chartId}: ${error.message}`, error.stack);
+      console.error('Error in addIndicator:', error);
       throw error;
     }
   }
 
-  async updateIndicator(chartId: string, indicatorId: string, updateIndicatorDto: any): Promise<Indicator> {
-    try {
-      // Find the chart to ensure it exists
-      await this.findOne(chartId);
-      
-      // Find the indicator
-      const indicator = await this.indicatorRepository.findOne({
-        where: { id: indicatorId, chart: { id: chartId } },
-      });
-      
-      if (!indicator) {
-        throw new NotFoundException(`Indicator with ID ${indicatorId} not found in chart ${chartId}`);
-      }
-      
-      // Update indicator properties
-      Object.assign(indicator, updateIndicatorDto);
-      
-      // Save the indicator
-      return await this.indicatorRepository.save(indicator);
-    } catch (error) {
-      this.logger.error(`Failed to update indicator ${indicatorId} for chart ${chartId}: ${error.message}`, error.stack);
-      throw error;
+  async updateIndicator(indicatorId: string, updateData: any): Promise<Indicator> {
+    await this.indicatorRepository.update(indicatorId, updateData);
+    
+    const indicator = await this.indicatorRepository.findOne({
+      where: { id: indicatorId },
+      relations: ['chart'],
+    });
+    
+    if (indicator) {
+      this.wsGateway.broadcastChartUpdate(indicator.chart.id, 'indicator:updated', indicator);
+    }
+    
+    return indicator;
+  }
+
+  async deleteIndicator(indicatorId: string): Promise<void> {
+    const indicator = await this.indicatorRepository.findOne({
+      where: { id: indicatorId },
+      relations: ['chart'],
+    });
+    
+    if (indicator) {
+      await this.indicatorRepository.delete(indicatorId);
+      this.wsGateway.broadcastChartUpdate(indicator.chart.id, 'indicator:deleted', { id: indicatorId });
     }
   }
 
-  async removeIndicator(chartId: string, indicatorId: string): Promise<void> {
-    try {
-      // Find the chart to ensure it exists
-      await this.findOne(chartId);
-      
-      // Find the indicator
-      const indicator = await this.indicatorRepository.findOne({
-        where: { id: indicatorId, chart: { id: chartId } },
-      });
-      
-      if (!indicator) {
-        throw new NotFoundException(`Indicator with ID ${indicatorId} not found in chart ${chartId}`);
-      }
-      
-      // Remove the indicator
-      await this.indicatorRepository.remove(indicator);
-    } catch (error) {
-      this.logger.error(`Failed to remove indicator ${indicatorId} from chart ${chartId}: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  // Chart data method
   async getChartData(symbol: string, from: number, to: number, interval: string): Promise<any[]> {
-    try {
-      this.logger.log(`Getting chart data for ${symbol} from ${from} to ${to} with interval ${interval}`);
+    console.log(`Getting chart data for ${symbol} from ${from} to ${to} with interval ${interval}`);
+    
+    // Convert from seconds to milliseconds for database query
+    const fromMs = from * 1000;
+    const toMs = to * 1000;
+    
+    const data = await this.chartDataRepository
+      .createQueryBuilder('data')
+      .where('data.symbol = :symbol', { symbol })
+      .andWhere('data.timestamp >= :from', { from: fromMs })
+      .andWhere('data.timestamp <= :to', { to: toMs })
+      .orderBy('data.timestamp', 'ASC')
+      .limit(2000)
+      .getMany();
+
+    console.log(`Found ${data.length} records in database for ${symbol}`);
+
+    if (data.length > 0) {
+      const formattedData = data.map(item => ({
+        time: Math.floor(item.timestamp / 1000),
+        open: parseFloat(item.open.toString()),
+        high: parseFloat(item.high.toString()),
+        low: parseFloat(item.low.toString()),
+        close: parseFloat(item.close.toString()),
+        volume: parseFloat(item.volume.toString()),
+      }));
       
-      // This would typically call a data provider or database
-      // For now, we'll return mock data from the database
-      const mockData = await this.getMockChartData(symbol, from, to, interval);
-      return mockData;
-    } catch (error) {
-      this.logger.error(`Failed to get chart data for ${symbol}: ${error.message}`, error.stack);
-      throw error;
+      console.log(`Returning ${formattedData.length} formatted records`);
+      return formattedData;
     }
+
+    console.log('No data found in database, returning empty array');
+    return [];
   }
 
-  private async getMockChartData(symbol: string, from: number, to: number, interval: string): Promise<any[]> {
-    // Implementation would depend on your data source
-    // This is just a placeholder
-    return [];
+  async getOrCreateDemoChart(): Promise<Chart> {
+    let chart = await this.chartRepository.findOne({
+      where: { name: 'Demo Chart' },
+      relations: ['drawings', 'indicators'],
+    });
+
+    if (!chart) {
+      const demoChart = {
+        name: 'Demo Chart',
+        symbol: 'BTCUSD',
+        chartType: 'candlestick' as const,
+        timeframe: '1h',
+        settings: {
+          theme: 'dark' as const,
+          gridLines: true,
+          volume: true,
+        }
+      };
+      chart = await this.createChart(demoChart, 'demo-user');
+    }
+
+    return chart;
+  }
+
+  async getDrawingsForChart(chartId: string): Promise<Drawing[]> {
+    return this.drawingRepository.find({
+      where: { chart: { id: chartId } },
+      order: { createdAt: 'ASC' }
+    });
+  }
+
+  async getIndicatorsForChart(chartId: string): Promise<Indicator[]> {
+    return this.indicatorRepository.find({
+      where: { chart: { id: chartId } },
+      order: { displayOrder: 'ASC', createdAt: 'ASC' }
+    });
   }
 }
